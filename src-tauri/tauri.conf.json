@@ -1,0 +1,38 @@
+{
+  "productName": "Ferramentas do Layone",
+  "version": "2.0.0",
+  "identifier": "com.controlpro.desktop",
+  "build": {
+    "frontendDist": "../frontend/dist",
+    "devUrl": "http://localhost:5173"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Ferramentas do Layone",
+        "width": 1280,
+        "height": 820,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' tauri: asset: https://asset.localhost; connect-src http://127.0.0.1:8000 ws://127.0.0.1:8000 http://localhost:8000 ws://localhost:8000 'self'; img-src 'self' data: blob: asset: tauri:; style-src 'self' 'unsafe-inline'; font-src 'self' data: https://fonts.gstatic.com https://fonts.googleapis.com"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/backend"
+    ],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    }
+  }
+}

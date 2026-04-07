@@ -1,0 +1,60 @@
+# ── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Ambiente virtual ──────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Secrets e configs locais ──────────────────────────────────────
+.env
+*.env
+.env.*
+gdrive_token.json
+credentials.json
+client_secret*.json
+config_pastas.json
+
+# ── Node / Frontend ──────────────────────────────────────────────
+node_modules/
+frontend/dist/
+
+# ── App desktop (legado — manter como referência) ─────────────────
+gerenciador_cursos_ORIGINAL.py
+
+# ── Claude / IDEs ─────────────────────────────────────────────────
+.claude/
+.cursorrules
+.vscode/
+.idea/
+*.suo
+*.user
+CLAUDE.md
+meu_assistente.md
+
+# ── OS ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs e cache ──────────────────────────────────────────────────
+*.log
+.pytest_cache/
+
+# ── Tauri build artifacts ─────────────────────────────────────────
+src-tauri/target/
+src-tauri/binaries/
+frontend/tsconfig.app.tsbuildinfo
+frontend/tsconfig.node.tsbuildinfo
+
+# ── PyInstaller artifacts ─────────────────────────────────────────
+backend/dist/
+backend/build/

@@ -1,0 +1,10 @@
+{
+  "identifier": "default",
+  "description": "Capability padrão do Control Pro",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-execute",
+    "shell:allow-spawn"
+  ]
+}
