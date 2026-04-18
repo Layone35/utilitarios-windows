@@ -7,17 +7,18 @@ import type { WsProgressMessage } from "../hooks/useWebSocket";
 import { Play, Square, TrendingUp, FileSearch, Loader2, FolderOpen } from "lucide-react";
 
 interface B3TabProps {
-  progress: WsProgressMessage | null;
+  progressMap: Record<string, WsProgressMessage>;
   onLog: (msg: string, nivel: string) => void;
 }
 
-export function B3Tab({ progress, onLog }: B3TabProps) {
+export function B3Tab({ progressMap, onLog }: B3TabProps) {
   const [pastaOuArquivo, setPastaOuArquivo] = useState("");
   const [pastaDestino, setPastaDestino] = useState("");
   const [ticker, setTicker] = useState("");
   const [apenasVista, setApenasVista] = useState(true);
   const [incluirFracionario, setIncluirFracionario] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const progress = taskId ? (progressMap[taskId] ?? null) : null;
   const [loading, setLoading] = useState(false);
   const [browsingFile, setBrowsingFile] = useState(false);
 

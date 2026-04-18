@@ -67,7 +67,7 @@ const TABS = [
 export default function App() {
   const [activeTab, setActiveTab] = useState("inicio");
   const [ffmpegOk, setFfmpegOk] = useState<boolean | null>(null);
-  const { connected, progress, logs, taskComplete, clearLogs, clearComplete } =
+  const { connected, progressMap, logs, taskComplete, clearLogs, clearComplete } =
     useWebSocket();
 
   // Health check ao carregar
@@ -259,38 +259,38 @@ export default function App() {
 
             {/* ── Vídeo ───────────────────────────────────────── */}
             <div className={activeTab === "video" ? "" : "hidden"}>
-              <VideoTab progress={progress} onLog={handleLog} />
+              <VideoTab progressMap={progressMap} onLog={handleLog} />
             </div>
 
             {/* ── Áudio ───────────────────────────────────────── */}
             <div className={activeTab === "audio" ? "" : "hidden"}>
-              <AudioTab progress={progress} onLog={handleLog} />
+              <AudioTab progressMap={progressMap} onLog={handleLog} />
             </div>
 
             {/* ── Pastas & ZIPs ───────────────────────────────── */}
             <div className={activeTab === "arquivos" ? "" : "hidden"}>
-              <FoldersTab progress={progress} onLog={handleLog} />
+              <FoldersTab progressMap={progressMap} onLog={handleLog} />
             </div>
 
             {/* ── Ferramentas Extras ──────────────────────────── */}
             <div className={activeTab === "extras" ? "" : "hidden"}>
-              <ExtrasTab progress={progress} onLog={handleLog} />
+              <ExtrasTab progressMap={progressMap} onLog={handleLog} />
             </div>
 
             {/* ── PDF ─────────────────────────────────────────── */}
             <div className={activeTab === "pdf" ? "" : "hidden"}>
-              <PdfTab progress={progress} onLog={handleLog} />
+              <PdfTab progressMap={progressMap} onLog={handleLog} />
             </div>
 
             {/* ── B3 COTAHIST ─────────────────────────────────── */}
             <div className={activeTab === "b3" ? "" : "hidden"}>
-              <B3Tab progress={progress} onLog={handleLog} />
+              <B3Tab progressMap={progressMap} onLog={handleLog} />
             </div>
 
             {/* ── Duplicatas ───────────────────────────────────── */}
             <div className={activeTab === "duplicatas" ? "" : "hidden"}>
               <DuplicatasTab
-                progress={progress}
+                progressMap={progressMap}
                 taskComplete={taskComplete}
                 onLog={handleLog}
               />

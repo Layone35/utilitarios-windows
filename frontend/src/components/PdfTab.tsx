@@ -8,16 +8,17 @@ import type { FileInfo } from "../lib/api";
 import { Play, Square, FileText, ArrowDownUp, Trash2, KeyRound, FolderOpen, Loader2, FilePlus2 } from "lucide-react";
 
 interface PdfTabProps {
-  progress: WsProgressMessage | null;
+  progressMap: Record<string, WsProgressMessage>;
   onLog: (msg: string, nivel: string) => void;
 }
 
-export function PdfTab({ progress, onLog }: PdfTabProps) {
+export function PdfTab({ progressMap, onLog }: PdfTabProps) {
   const [pasta, setPasta] = useState("");
   const [saida, setSaida] = useState("");
   const [ordenar, setOrdenar] = useState(true);
   const [mergeSubpastas, setMergeSubpastas] = useState(true);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const progress = taskId ? (progressMap[taskId] ?? null) : null;
   const [loading, setLoading] = useState(false);
   const [pdfs, setPdfs] = useState<FileInfo[]>([]);
   const [loadingList, setLoadingList] = useState(false);

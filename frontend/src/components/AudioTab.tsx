@@ -8,15 +8,16 @@ import type { WsProgressMessage } from "../hooks/useWebSocket";
 import { Play, Square } from "lucide-react";
 
 interface AudioTabProps {
-  progress: WsProgressMessage | null;
+  progressMap: Record<string, WsProgressMessage>;
   onLog: (msg: string, nivel: string) => void;
 }
 
 type SubTab = "extract" | "convert";
 
-export function AudioTab({ progress, onLog }: AudioTabProps) {
+export function AudioTab({ progressMap, onLog }: AudioTabProps) {
   const [subTab, setSubTab] = useState<SubTab>("extract");
   const [taskId, setTaskId] = useState<string | null>(null);
+  const progress = taskId ? (progressMap[taskId] ?? null) : null;
   const [loading, setLoading] = useState(false);
 
   // ── Vídeo → Áudio ──────────────────────────────────────────

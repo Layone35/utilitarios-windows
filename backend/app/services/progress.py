@@ -29,10 +29,17 @@ class ProgressManager:
         self._connections: list[WebSocket] = []
         self._tasks: dict[str, TaskInfo] = {}
         self._procs: dict[str, subprocess.Popen] = {}
+        self._lock: asyncio.Lock | None = None  # inicializado lazy (precisa de event loop)
+
+    def _get_lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def connect(self, ws: WebSocket) -> None:
         await ws.accept()
-        self._connections.append(ws)
+        async with self._get_lock():
+            self._connections.append(ws)
 
     def disconnect(self, ws: WebSocket) -> None:
         if ws in self._connections:
@@ -47,18 +54,15 @@ class ProgressManager:
         return self._tasks.get(task_id)
 
     def set_proc(self, task_id: str, proc: subprocess.Popen) -> None:
-        """Registra o processo ffmpeg ativo para poder matar se necessário."""
         self._procs[task_id] = proc
 
     def clear_proc(self, task_id: str) -> None:
-        """Remove referência ao processo após conclusão."""
         self._procs.pop(task_id, None)
 
     def cancel_task(self, task_id: str) -> bool:
         task = self._tasks.get(task_id)
         if task and not task.concluida:
             task.cancelada = True
-            # Mata o ffmpeg em execução imediatamente
             proc = self._procs.pop(task_id, None)
             if proc and proc.poll() is None:
                 proc.kill()
@@ -66,7 +70,6 @@ class ProgressManager:
         return False
 
     def kill_all(self) -> None:
-        """Mata todos os processos ffmpeg ativos — chamado no shutdown do app."""
         for proc in list(self._procs.values()):
             try:
                 if proc.poll() is None:
@@ -85,6 +88,8 @@ class ProgressManager:
         total: int,
         mensagem: str = "",
         status: str = "processando",
+        elapsed: float | None = None,
+        eta: float | None = None,
     ) -> None:
         task = self._tasks.get(task_id)
         if task:
@@ -100,6 +105,8 @@ class ProgressManager:
             "total": total,
             "mensagem": mensagem,
             "status": status,
+            "elapsed": elapsed,
+            "eta": eta,
         })
 
     async def add_log(
@@ -130,14 +137,20 @@ class ProgressManager:
         })
 
     async def _broadcast(self, data: dict[str, Any]) -> None:
+        async with self._get_lock():
+            snapshot = list(self._connections)  # cópia para evitar mutação durante iteração
+
         dead: list[WebSocket] = []
-        for ws in self._connections:
+        for ws in snapshot:
             try:
                 await ws.send_json(data)
             except Exception:
                 dead.append(ws)
-        for ws in dead:
-            self.disconnect(ws)
+
+        if dead:
+            async with self._get_lock():
+                for ws in dead:
+                    self.disconnect(ws)
 
 
 # Instância global (singleton)

@@ -1,12 +1,12 @@
 """Router de manipulação de pastas e extração de ZIPs/RARs."""
-import os
 import asyncio
-import zipfile
+import os
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 
-# Localiza o executável 7z (PATH ou instalação padrão do Windows)
+
 def _find_7z() -> str:
     import shutil as _shutil
     exe = _shutil.which("7z") or _shutil.which("7z.exe")
@@ -18,7 +18,7 @@ def _find_7z() -> str:
     ]:
         if os.path.isfile(candidate):
             return candidate
-    return "7z"  # fallback, vai falhar com mensagem clara
+    return "7z"
 
 _7Z = _find_7z()
 
@@ -33,59 +33,62 @@ from app.models.schemas import (
     TaskResponse,
 )
 from app.services.progress import progress_manager
+from app.utils import _fmt_bytes, _scan
 
 router = APIRouter(prefix="/api/folders", tags=["folders"])
 
 _EXT_ARCHIVE = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tar.gz", ".tgz"}
 
-# Caracteres inválidos em nomes de arquivo no Windows
 _CHARS_INVALIDOS = str.maketrans({c: "_" for c in r'\/:*?"<>|'})
 
 
 def _sanitizar_nome(nome: str) -> str:
-    """Remove/substitui caracteres inválidos para nomes de arquivo no Windows."""
     return nome.translate(_CHARS_INVALIDOS).strip()
 
 
 def _truncar_nome(nome: str, pasta_dest: Path, sufixo: str, limite: int = 250) -> str:
-    """Trunca o nome do arquivo se o caminho final ultrapassar o limite de caracteres."""
-    caminho_base = len(str(pasta_dest)) + 1  # +1 pelo separador
+    caminho_base = len(str(pasta_dest)) + 1
     disponivel = limite - caminho_base - len(sufixo)
     stem = Path(nome).stem
     if len(stem) > disponivel:
-        stem = stem[:max(disponivel, 10)]  # mínimo 10 chars
+        stem = stem[:max(disponivel, 10)]
     return stem + sufixo
 
 
-def _scan(pasta: str, exts: set[str] | None, subpastas: bool) -> list[Path]:
-    orig = Path(pasta)
-    if subpastas:
-        candidatos = (Path(r) / f for r, _, fs in os.walk(pasta) for f in fs)
-    else:
-        candidatos = (orig / f for f in os.listdir(pasta) if (orig / f).is_file())
-    if exts:
-        return sorted(p for p in candidatos if p.suffix.lower() in exts)
-    return sorted(candidatos)
-
-
-def _fmt_bytes(n: int) -> str:
-    for u in ("B", "KB", "MB", "GB"):
-        if n < 1024:
-            return f"{n:.1f} {u}"
-        n /= 1024
-    return f"{n:.1f} TB"
+def _resolver_nome_local(pasta: Path, nome: str) -> Path:
+    """Resolve conflito de nome dentro de uma pasta."""
+    destino = pasta / nome
+    if not destino.exists():
+        return destino
+    stem = Path(nome).stem
+    ext = Path(nome).suffix
+    i = 2
+    while True:
+        novo = pasta / f"{stem}_{i}{ext}"
+        if not novo.exists():
+            return novo
+        i += 1
 
 
 async def _extrair_arquivos(req: ExtractArchiveRequest, task_id: str) -> None:
     pm = progress_manager
+
+    if not req.pasta_origem.strip() or not req.pasta_destino.strip():
+        await pm.add_log(task_id, "❌ Pasta de origem e destino são obrigatórias.", "erro")
+        await pm.complete_task(task_id, "Caminhos inválidos.")
+        return
+    if not Path(req.pasta_origem).exists():
+        await pm.add_log(task_id, f"❌ Pasta de origem não encontrada: {req.pasta_origem}", "erro")
+        await pm.complete_task(task_id, "Pasta de origem não encontrada.")
+        return
+
     orig = req.pasta_origem
     dest = req.pasta_destino
     os.makedirs(dest, exist_ok=True)
 
-    # Encontrar arquivos compactados (pula apenas partes RAR clássicas: .r00, .r01, ...)
-    _ext_archive_filtrada = _EXT_ARCHIVE - {".r00", ".r01", ".r02", ".r03", ".r04",
-                                             ".r05", ".r06", ".r07", ".r08", ".r09"}
-    arquivos = _scan(orig, _ext_archive_filtrada, req.incluir_subpastas)
+    _ext_filtrada = _EXT_ARCHIVE - {".r00", ".r01", ".r02", ".r03", ".r04",
+                                      ".r05", ".r06", ".r07", ".r08", ".r09"}
+    arquivos = _scan(orig, _ext_filtrada, req.incluir_subpastas)
 
     if not arquivos:
         await pm.add_log(task_id, "ℹ️ Nenhum arquivo compactado encontrado.", "warn")
@@ -95,7 +98,9 @@ async def _extrair_arquivos(req: ExtractArchiveRequest, task_id: str) -> None:
     total = len(arquivos)
     await pm.add_log(task_id, f"📦 {total} arquivo(s) compactado(s) encontrado(s)", "info")
 
+    loop = asyncio.get_running_loop()
     ok = err = 0
+
     for i, arq in enumerate(arquivos, 1):
         task = pm.get_task(task_id)
         if task and task.cancelada:
@@ -107,30 +112,18 @@ async def _extrair_arquivos(req: ExtractArchiveRequest, task_id: str) -> None:
         try:
             ext = arq.suffix.lower()
             if ext == ".zip":
-                await asyncio.get_event_loop().run_in_executor(
+                await loop.run_in_executor(
                     None,
                     lambda a=arq, p=pasta_extrair: _extrair_zip(a, p),
                 )
             elif ext in (".tar", ".gz", ".bz2", ".xz", ".tgz"):
-                await asyncio.get_event_loop().run_in_executor(
+                await loop.run_in_executor(
                     None,
                     lambda a=arq, p=pasta_extrair: shutil.unpack_archive(str(a), str(p)),
                 )
-            elif ext == ".rar":
-                # Usa 7z para extrair RAR (suporta multi-volume automaticamente)
+            elif ext in (".rar", ".7z"):
                 os.makedirs(pasta_extrair, exist_ok=True)
-                await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda a=arq, p=pasta_extrair: subprocess.run(
-                        [_7Z, "x", str(a), f"-o{p}", "-y"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        timeout=600,
-                        creationflags=subprocess.CREATE_NO_WINDOW,
-                    ),
-                )
-            elif ext == ".7z":
-                await asyncio.get_event_loop().run_in_executor(
+                await loop.run_in_executor(
                     None,
                     lambda a=arq, p=pasta_extrair: subprocess.run(
                         [_7Z, "x", str(a), f"-o{p}", "-y"],
@@ -160,16 +153,24 @@ async def _extrair_arquivos(req: ExtractArchiveRequest, task_id: str) -> None:
 
 async def _flatten_folder(req: FlattenFolderRequest, task_id: str) -> None:
     pm = progress_manager
+
+    if not req.pasta_origem.strip() or not req.pasta_destino.strip():
+        await pm.add_log(task_id, "❌ Pasta de origem e destino são obrigatórias.", "erro")
+        await pm.complete_task(task_id, "Caminhos inválidos.")
+        return
+    if not Path(req.pasta_origem).exists():
+        await pm.add_log(task_id, f"❌ Pasta de origem não encontrada: {req.pasta_origem}", "erro")
+        await pm.complete_task(task_id, "Pasta de origem não encontrada.")
+        return
+
     orig = req.pasta_origem
     dest = req.pasta_destino
     os.makedirs(dest, exist_ok=True)
 
-    # Filtro de extensões
     exts: set[str] | None = None
     if req.extensoes:
         exts = {e.lower() if e.startswith(".") else f".{e.lower()}" for e in req.extensoes}
 
-    # Coletar todos os arquivos recursivamente (ignora a raiz direta se for a mesma que destino)
     arquivos: list[Path] = []
     for r, _, fs in os.walk(orig):
         for f in fs:
@@ -178,7 +179,6 @@ async def _flatten_folder(req: FlattenFolderRequest, task_id: str) -> None:
                 continue
             arquivos.append(caminho)
 
-    # Ordenar pelo caminho relativo completo para respeitar a hierarquia das pastas
     arquivos.sort(key=lambda p: str(p.relative_to(orig)).lower())
 
     if not arquivos:
@@ -189,13 +189,11 @@ async def _flatten_folder(req: FlattenFolderRequest, task_id: str) -> None:
     total = len(arquivos)
     acao = "movido" if req.mover else "copiado"
     modo = "preservando ordem" if req.preservar_ordem else "sem prefixo"
-    await pm.add_log(
-        task_id,
-        f"📁 {total} arquivo(s) para {'mover' if req.mover else 'copiar'} ({modo})",
-        "info",
-    )
+    await pm.add_log(task_id, f"📁 {total} arquivo(s) para {'mover' if req.mover else 'copiar'} ({modo})", "info")
 
+    loop = asyncio.get_running_loop()
     ok = err = 0
+
     for i, arq in enumerate(arquivos, 1):
         task = pm.get_task(task_id)
         if task and task.cancelada:
@@ -203,45 +201,33 @@ async def _flatten_folder(req: FlattenFolderRequest, task_id: str) -> None:
 
         await pm.update_progress(task_id, i, total, f"[{i}/{total}] {arq.name}")
 
-        # Gerar nome de destino (com prefixo de pasta se preservar_ordem=True)
         if req.preservar_ordem:
             rel = arq.parent.relative_to(orig)
             partes = [p for p in rel.parts if p]
             if partes:
-                # Sanitizar cada parte: remove caracteres inválidos no Windows
                 partes_safe = [_sanitizar_nome(p) for p in partes]
-                prefixo = " - ".join(partes_safe)
-                nome_base = f"{prefixo} - {arq.name}"
+                nome_base = f"{' - '.join(partes_safe)} - {arq.name}"
             else:
                 nome_base = arq.name
         else:
             nome_base = arq.name
 
-        # Truncar se o caminho final ultrapassar 240 chars (margem segura)
         nome_dest = _truncar_nome(nome_base, Path(dest), arq.suffix)
-
-        # Resolver conflito de nome
-        destino_final = Path(dest) / nome_dest
-        contador = 2
-        while destino_final.exists():
-            stem = Path(nome_dest).stem
-            destino_final = Path(dest) / f"{stem}_{contador}{arq.suffix}"
-            contador += 1
+        destino_final = _resolver_nome_local(Path(dest), nome_dest)
 
         try:
             if req.mover:
-                await asyncio.get_event_loop().run_in_executor(
+                await loop.run_in_executor(
                     None, lambda s=arq, d=destino_final: shutil.move(str(s), str(d))
                 )
             else:
-                await asyncio.get_event_loop().run_in_executor(
+                await loop.run_in_executor(
                     None, lambda s=arq, d=destino_final: shutil.copy2(str(s), str(d))
                 )
             tamanho = destino_final.stat().st_size
-            nome_exibir = destino_final.name
             await pm.add_log(
                 task_id,
-                f"✅ {arq.name} → {nome_exibir} ({_fmt_bytes(tamanho)}) {acao}",
+                f"✅ {arq.name} → {destino_final.name} ({_fmt_bytes(tamanho)}) {acao}",
                 "ok",
             )
             ok += 1
@@ -291,11 +277,7 @@ async def list_files(req: ListFilesRequest):
                 tamanho = caminho.stat().st_size
             except OSError:
                 tamanho = 0
-            arquivos.append(FileInfo(
-                nome=f,
-                tamanho=tamanho,
-                caminho=str(caminho),
-            ))
+            arquivos.append(FileInfo(nome=f, tamanho=tamanho, caminho=str(caminho)))
 
     arquivos.sort(key=lambda x: x.nome.lower())
     return ListFilesResponse(arquivos=arquivos, total=len(arquivos))

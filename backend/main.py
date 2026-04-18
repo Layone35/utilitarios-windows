@@ -35,6 +35,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
         "http://tauri.localhost",  # Tauri v2 WebView2 no Windows
         "tauri://localhost",       # Tauri v1 (compatibilidade)
     ],
@@ -55,18 +57,32 @@ app.include_router(b3.router)
 app.include_router(duplicatas.router)
 
 
+import os
+import glob
+
 def _check_ffmpeg() -> bool:
-    """Verifica se FFmpeg está disponível no PATH."""
+    """Verifica se FFmpeg está disponível no PATH ou em pacotes WinGet."""
+    # 1. Tentar PATH normal
     try:
         subprocess.run(
             ["ffmpeg", "-version"],
             capture_output=True,
-            timeout=5,
+            timeout=2,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         return True
     except Exception:
-        return False
+        pass
+
+    # 2. Tentar detectar via WinGet no Windows
+    winget_path = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Packages")
+    if os.path.exists(winget_path):
+        # Busca rápida por pastas que podem conter o binário
+        for root, dirs, files in os.walk(winget_path):
+            if "Gyan.FFmpeg" in root and "ffmpeg.exe" in files:
+                return True
+    
+    return False
 
 
 @app.get("/", response_model=HealthResponse)

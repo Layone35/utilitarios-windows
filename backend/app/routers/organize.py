@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks
 
 from app.models.schemas import OrganizeFolderRequest, OrganizePorDataRequest, TaskResponse
 from app.services.progress import progress_manager
+from app.utils import _fmt_bytes
 
 router = APIRouter(prefix="/api/organize", tags=["organize"])
 
@@ -56,14 +57,6 @@ _CATEGORIAS: dict[str, str] = {
     ".exe": "Programas", ".msi": "Programas", ".apk": "Programas",
     ".deb": "Programas", ".dmg": "Programas",
 }
-
-
-def _fmt_bytes(n: int) -> str:
-    for u in ("B", "KB", "MB", "GB"):
-        if n < 1024:
-            return f"{n:.1f} {u}"
-        n /= 1024
-    return f"{n:.1f} TB"
 
 
 def _categoria(ext: str) -> str:
@@ -121,11 +114,11 @@ async def _organizar(req: OrganizeFolderRequest, task_id: str) -> None:
 
         try:
             if req.mover:
-                await asyncio.get_event_loop().run_in_executor(
+                await asyncio.get_running_loop().run_in_executor(
                     None, lambda s=arq, d=destino_final: shutil.move(str(s), str(d))
                 )
             else:
-                await asyncio.get_event_loop().run_in_executor(
+                await asyncio.get_running_loop().run_in_executor(
                     None, lambda s=arq, d=destino_final: shutil.copy2(str(s), str(d))
                 )
             tamanho = destino_final.stat().st_size
@@ -304,11 +297,11 @@ async def _organizar_por_data(req: OrganizePorDataRequest, task_id: str) -> None
 
         try:
             if req.mover:
-                await asyncio.get_event_loop().run_in_executor(
+                await asyncio.get_running_loop().run_in_executor(
                     None, lambda s=arq, d=destino_arq: shutil.move(str(s), str(d))
                 )
             else:
-                await asyncio.get_event_loop().run_in_executor(
+                await asyncio.get_running_loop().run_in_executor(
                     None, lambda s=arq, d=destino_arq: shutil.copy2(str(s), str(d))
                 )
             mes_nome = f"{dt.month:02d} - {_MESES_PT[dt.month]}"
@@ -337,7 +330,3 @@ async def organize_por_data(req: OrganizePorDataRequest, bg: BackgroundTasks):
     return TaskResponse(task_id=task_id, message="Organização por data iniciada")
 
 
-@router.post("/cancel-data/{task_id}")
-async def cancel_organize_data(task_id: str):
-    ok = progress_manager.cancel_task(task_id)
-    return {"cancelado": ok}

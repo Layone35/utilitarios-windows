@@ -115,7 +115,7 @@ async def _scan_exatas(arquivos: list[Path], task_id: str) -> list[dict[str, Any
     total_c = sum(len(lst) for lst in candidatos)
     proc = 0
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     for grupo in candidatos:
         task = pm.get_task(task_id)
         if task and task.cancelada:
@@ -132,8 +132,13 @@ async def _scan_exatas(arquivos: list[Path], task_id: str) -> list[dict[str, Any
 
     for h, arqs in por_hash.items():
         if len(arqs) > 1:
-            tam_total = sum(a.stat().st_size for a in arqs if a.exists())
-            tam_recuperavel = sum(a.stat().st_size for a in arqs[1:] if a.exists())
+            def _sz(p: Path) -> int:
+                try:
+                    return p.stat().st_size
+                except OSError:
+                    return 0
+            tam_total = sum(_sz(a) for a in arqs)
+            tam_recuperavel = sum(_sz(a) for a in arqs[1:])
             grupos.append({
                 "tipo": "exata",
                 "chave": h[:16],
@@ -165,7 +170,12 @@ async def _scan_familias(arquivos: list[Path], task_id: str) -> list[dict[str, A
     for (_pasta_str, base), arqs in por_base.items():
         if len(arqs) > 1:
             arqs_sorted = sorted(arqs, key=lambda p: p.suffix)
-            tam_total = sum(a.stat().st_size for a in arqs_sorted if a.exists())
+            def _safe_size(p: Path) -> int:
+                try:
+                    return p.stat().st_size
+                except OSError:
+                    return 0
+            tam_total = sum(_safe_size(a) for a in arqs_sorted)
             grupos.append({
                 "tipo": "familia",
                 "chave": base,

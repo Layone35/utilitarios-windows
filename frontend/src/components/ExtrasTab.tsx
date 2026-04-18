@@ -14,15 +14,16 @@ import type { WsProgressMessage } from "../hooks/useWebSocket";
 import { Play, Square } from "lucide-react";
 
 interface ExtrasTabProps {
-  progress: WsProgressMessage | null;
+  progressMap: Record<string, WsProgressMessage>;
   onLog: (msg: string, nivel: string) => void;
 }
 
 type SubTab = "video" | "audio" | "imagem" | "pdf";
 
-export function ExtrasTab({ progress, onLog }: ExtrasTabProps) {
+export function ExtrasTab({ progressMap, onLog }: ExtrasTabProps) {
   const [subTab, setSubTab] = useState<SubTab>("video");
   const [taskId, setTaskId] = useState<string | null>(null);
+  const progress = taskId ? (progressMap[taskId] ?? null) : null;
   const [loading, setLoading] = useState(false);
 
   // ── Vídeo ──────────────────────────────────────────────────
@@ -51,8 +52,9 @@ export function ExtrasTab({ progress, onLog }: ExtrasTabProps) {
   const [cpDestino, setCpDestino] = useState("");
   const [cpQual, setCpQual] = useState("ebook");
 
-  // ── Subpastas (compartilhado) ──────────────────────────────
+  // ── Opções globais ─────────────────────────────────────────
   const [incluirSubpastas, setIncluirSubpastas] = useState(true);
+  const [pularExistentes, setPularExistentes] = useState(false);
 
   const handleCompress = async () => {
     try {
@@ -69,6 +71,7 @@ export function ExtrasTab({ progress, onLog }: ExtrasTabProps) {
             preset: cvPreset,
             gpu: cvGpu,
             incluir_subpastas: incluirSubpastas,
+            pular_existentes: pularExistentes,
           });
           break;
         case "audio":
@@ -77,6 +80,7 @@ export function ExtrasTab({ progress, onLog }: ExtrasTabProps) {
             pasta_destino: caDestino,
             bitrate: caBr,
             incluir_subpastas: incluirSubpastas,
+            pular_existentes: pularExistentes,
           });
           break;
         case "imagem":
@@ -87,6 +91,7 @@ export function ExtrasTab({ progress, onLog }: ExtrasTabProps) {
             escala: ciEscala,
             formato: ciFmt,
             incluir_subpastas: incluirSubpastas,
+            pular_existentes: pularExistentes,
           });
           break;
         case "pdf":
@@ -95,6 +100,7 @@ export function ExtrasTab({ progress, onLog }: ExtrasTabProps) {
             pasta_destino: cpDestino,
             qualidade: cpQual,
             incluir_subpastas: incluirSubpastas,
+            pular_existentes: pularExistentes,
           });
           break;
       }
@@ -374,25 +380,48 @@ export function ExtrasTab({ progress, onLog }: ExtrasTabProps) {
         </div>
       )}
 
-      {/* Toggle subpastas */}
-      <label className="flex items-center gap-3 cursor-pointer group">
-        <button
-          type="button"
-          onClick={() => setIncluirSubpastas((v) => !v)}
-          className={cn(
-            "relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200",
-            incluirSubpastas ? "bg-amber-500" : "bg-secondary",
-          )}
-        >
-          <span className={cn(
-            "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition duration-200",
-            incluirSubpastas ? "translate-x-5" : "translate-x-0",
-          )} />
-        </button>
-        <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
-          {incluirSubpastas ? "Incluindo arquivos em subpastas" : "Apenas pasta principal (sem subpastas)"}
-        </span>
-      </label>
+      {/* Toggles globais */}
+      <div className="space-y-2">
+        <label className="flex items-center gap-3 cursor-pointer group">
+          <button
+            type="button"
+            onClick={() => setIncluirSubpastas((v) => !v)}
+            className={cn(
+              "relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200",
+              incluirSubpastas ? "bg-amber-500" : "bg-secondary",
+            )}
+          >
+            <span className={cn(
+              "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition duration-200",
+              incluirSubpastas ? "translate-x-5" : "translate-x-0",
+            )} />
+          </button>
+          <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+            {incluirSubpastas ? "Incluindo arquivos em subpastas" : "Apenas pasta principal (sem subpastas)"}
+          </span>
+        </label>
+
+        <label className="flex items-center gap-3 cursor-pointer group">
+          <button
+            type="button"
+            onClick={() => setPularExistentes((v) => !v)}
+            className={cn(
+              "relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200",
+              pularExistentes ? "bg-amber-500" : "bg-secondary",
+            )}
+          >
+            <span className={cn(
+              "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition duration-200",
+              pularExistentes ? "translate-x-5" : "translate-x-0",
+            )} />
+          </button>
+          <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+            {pularExistentes
+              ? "Pulando arquivos já existentes no destino (retomável)"
+              : "Reprocessar mesmo se já existir no destino"}
+          </span>
+        </label>
+      </div>
 
       {/* Progresso */}
       <ProgressBar progress={progress} accentColor="bg-amber-500" />

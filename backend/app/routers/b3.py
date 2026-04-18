@@ -169,7 +169,7 @@ async def _parsear_b3(req: B3ParseRequest, task_id: str) -> None:
                 await pm.update_progress(task_id, i, len(arquivos), f"[{i}/{len(arquivos)}] {arq.name}")
                 await pm.add_log(task_id, f"🔍 Processando {arq.name}...", "info")
 
-                linhas, registros = await asyncio.get_event_loop().run_in_executor(
+                linhas, registros = await asyncio.get_running_loop().run_in_executor(
                     None, lambda a=arq: _processar_arquivo(a, writer)
                 )
                 total_linhas += linhas

@@ -1,17 +1,14 @@
 """Router de conversão de áudio — Vídeo→Áudio e Áudio→Áudio."""
-import os
 import asyncio
+import os
 import subprocess
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks
 
-from app.models.schemas import (
-    ExtractAudioRequest,
-    ConvertAudioRequest,
-    TaskResponse,
-)
+from app.models.schemas import ExtractAudioRequest, ConvertAudioRequest, TaskResponse
 from app.services.progress import progress_manager
+from app.utils import _fmt_bytes, _scan, _resolver_nome
 
 router = APIRouter(prefix="/api/audio", tags=["audio"])
 
@@ -25,7 +22,6 @@ _EXT_AUDIO = {
     ".wma", ".aiff", ".opus", ".ape", ".m4b", ".mpeg", ".mpga",
 }
 
-# Mapeamento de codec por formato de saída
 _CODEC_VA = {
     "mp3":  ["-vn", "-ar", "44100", "-ac", "2", "-b:a"],
     "aac":  ["-vn", "-c:a", "aac", "-b:a"],
@@ -48,7 +44,6 @@ _CODEC_AA = {
 
 
 def _run_ffmpeg(cmd: list[str], task_id: str, timeout: int) -> int:
-    """Executa ffmpeg via Popen, registra proc para cancelamento/shutdown."""
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
@@ -66,39 +61,18 @@ def _run_ffmpeg(cmd: list[str], task_id: str, timeout: int) -> int:
     return proc.returncode if proc.returncode is not None else -1
 
 
-def _fmt_bytes(n: int) -> str:
-    for u in ("B", "KB", "MB", "GB"):
-        if n < 1024:
-            return f"{n:.1f} {u}"
-        n /= 1024
-    return f"{n:.1f} TB"
-
-
-def _scan(pasta: str, exts: set[str], subpastas: bool) -> list[Path]:
-    orig = Path(pasta)
-    if subpastas:
-        candidatos = (Path(r) / f for r, _, fs in os.walk(pasta) for f in fs)
-    else:
-        candidatos = (orig / f for f in os.listdir(pasta) if (orig / f).is_file())
-    return sorted(p for p in candidatos if p.suffix.lower() in exts)
-
-
-def _resolver_nome(pasta: str, nome: str) -> Path:
-    destino = Path(pasta) / nome
-    if not destino.exists():
-        return destino
-    base = destino.stem
-    ext = destino.suffix
-    i = 1
-    while True:
-        novo = Path(pasta) / f"{base}_{i}{ext}"
-        if not novo.exists():
-            return novo
-        i += 1
-
-
 async def _extrair_audio(req: ExtractAudioRequest, task_id: str) -> None:
     pm = progress_manager
+
+    if not req.pasta_origem.strip() or not req.pasta_destino.strip():
+        await pm.add_log(task_id, "❌ Pasta de origem e destino são obrigatórias.", "erro")
+        await pm.complete_task(task_id, "Caminhos inválidos.")
+        return
+    if not Path(req.pasta_origem).exists():
+        await pm.add_log(task_id, f"❌ Pasta de origem não encontrada: {req.pasta_origem}", "erro")
+        await pm.complete_task(task_id, "Pasta de origem não encontrada.")
+        return
+
     orig = req.pasta_origem
     dest = req.pasta_destino
     os.makedirs(dest, exist_ok=True)
@@ -116,13 +90,11 @@ async def _extrair_audio(req: ExtractAudioRequest, task_id: str) -> None:
     await pm.add_log(task_id, f"▶ {total} vídeo(s) → .{fmt.upper()}", "info")
 
     codec_base = _CODEC_VA.get(fmt, ["-vn", "-ar", "44100", "-ac", "2", "-b:a"])
-    # Adiciona bitrate se o codec usa
-    if "-b:a" in codec_base:
-        codec_args = codec_base + [f"{br}k"]
-    else:
-        codec_args = codec_base[:]
+    codec_args = codec_base + [f"{br}k"] if "-b:a" in codec_base else codec_base[:]
 
+    loop = asyncio.get_running_loop()
     ok = err = 0
+
     for i, video in enumerate(videos, 1):
         task = pm.get_task(task_id)
         if task and task.cancelada:
@@ -136,11 +108,10 @@ async def _extrair_audio(req: ExtractAudioRequest, task_id: str) -> None:
         cmd = ["ffmpeg", "-y", "-i", str(video)] + codec_args + [str(dest_arq), "-loglevel", "quiet"]
 
         try:
-            returncode = await asyncio.get_event_loop().run_in_executor(
+            returncode = await loop.run_in_executor(
                 None,
                 lambda c=cmd: _run_ffmpeg(c, task_id, 3600),
             )
-            # Verifica se foi cancelado durante a execução
             task = pm.get_task(task_id)
             if task and task.cancelada:
                 break
@@ -160,6 +131,16 @@ async def _extrair_audio(req: ExtractAudioRequest, task_id: str) -> None:
 
 async def _converter_audio(req: ConvertAudioRequest, task_id: str) -> None:
     pm = progress_manager
+
+    if not req.pasta_origem.strip() or not req.pasta_destino.strip():
+        await pm.add_log(task_id, "❌ Pasta de origem e destino são obrigatórias.", "erro")
+        await pm.complete_task(task_id, "Caminhos inválidos.")
+        return
+    if not Path(req.pasta_origem).exists():
+        await pm.add_log(task_id, f"❌ Pasta de origem não encontrada: {req.pasta_origem}", "erro")
+        await pm.complete_task(task_id, "Pasta de origem não encontrada.")
+        return
+
     orig = req.pasta_origem
     dest = req.pasta_destino
     os.makedirs(dest, exist_ok=True)
@@ -177,12 +158,11 @@ async def _converter_audio(req: ConvertAudioRequest, task_id: str) -> None:
     await pm.add_log(task_id, f"▶ {total} áudio(s) → .{fmt.upper()}", "info")
 
     codec_base = _CODEC_AA.get(fmt, ["-c:a", "libmp3lame", "-b:a"])
-    if "-b:a" in codec_base:
-        codec_args = codec_base + [f"{br}k"]
-    else:
-        codec_args = codec_base[:]
+    codec_args = codec_base + [f"{br}k"] if "-b:a" in codec_base else codec_base[:]
 
+    loop = asyncio.get_running_loop()
     ok = err = 0
+
     for i, arq in enumerate(audios, 1):
         task = pm.get_task(task_id)
         if task and task.cancelada:
@@ -194,11 +174,10 @@ async def _converter_audio(req: ConvertAudioRequest, task_id: str) -> None:
         cmd = ["ffmpeg", "-y", "-i", str(arq)] + codec_args + [str(dest_arq), "-loglevel", "quiet"]
 
         try:
-            returncode = await asyncio.get_event_loop().run_in_executor(
+            returncode = await loop.run_in_executor(
                 None,
                 lambda c=cmd: _run_ffmpeg(c, task_id, 3600),
             )
-            # Verifica se foi cancelado durante a execução
             task = pm.get_task(task_id)
             if task and task.cancelada:
                 break

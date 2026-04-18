@@ -27,16 +27,17 @@ import {
 } from "lucide-react";
 
 interface DuplicatasTabProps {
-  progress: WsProgressMessage | null;
+  progressMap: Record<string, WsProgressMessage>;
   taskComplete: WsProgressMessage | null;
   onLog: (msg: string, nivel: string) => void;
 }
 
-export function DuplicatasTab({ progress, taskComplete, onLog }: DuplicatasTabProps) {
+export function DuplicatasTab({ progressMap, taskComplete, onLog }: DuplicatasTabProps) {
   const [pasta, setPasta] = useState("");
   const [recursivo, setRecursivo] = useState(true);
   const [modo, setModo] = useState("3"); // 1=exatas, 2=familias, 3=ambos
   const [taskId, setTaskId] = useState<string | null>(null);
+  const progress = taskId ? (progressMap[taskId] ?? null) : null;
   const [loading, setLoading] = useState(false);
   const [resultado, setResultado] = useState<DuplicatasResultado | null>(null);
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());

@@ -159,14 +159,16 @@ class CompressVideoRequest(BaseModel):
     codec: VideoCodec = Field(default=VideoCodec.h264)
     preset: VideoPreset = Field(default=VideoPreset.veryfast)
     gpu: GpuAccel = Field(default=GpuAccel.cpu)
-    incluir_subpastas: bool = Field(default=True, description="Buscar arquivos em subpastas")
+    incluir_subpastas: bool = Field(default=True)
+    pular_existentes: bool = Field(default=False, description="Pular arquivos que já existem no destino")
 
 
 class CompressAudioRequest(BaseModel):
     pasta_origem: str
     pasta_destino: str
     bitrate: CompressAudioBitrate = Field(default=CompressAudioBitrate.b128k)
-    incluir_subpastas: bool = Field(default=True, description="Buscar arquivos em subpastas")
+    incluir_subpastas: bool = Field(default=True)
+    pular_existentes: bool = Field(default=False, description="Pular arquivos que já existem no destino")
 
 
 class CompressImageRequest(BaseModel):
@@ -175,14 +177,16 @@ class CompressImageRequest(BaseModel):
     qualidade: int = Field(default=75, ge=10, le=95)
     escala: ImageScale = Field(default=ImageScale.original)
     formato: ImageFormat = Field(default=ImageFormat.original)
-    incluir_subpastas: bool = Field(default=True, description="Buscar arquivos em subpastas")
+    incluir_subpastas: bool = Field(default=True)
+    pular_existentes: bool = Field(default=False, description="Pular arquivos que já existem no destino")
 
 
 class CompressPdfRequest(BaseModel):
     pasta_origem: str
     pasta_destino: str
     qualidade: PdfQuality = Field(default=PdfQuality.ebook)
-    incluir_subpastas: bool = Field(default=True, description="Buscar arquivos em subpastas")
+    incluir_subpastas: bool = Field(default=True)
+    pular_existentes: bool = Field(default=False, description="Pular arquivos que já existem no destino")
 
 
 # ── PDF Merge Requests ───────────────────────────────────────

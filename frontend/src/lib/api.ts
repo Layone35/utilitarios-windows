@@ -2,7 +2,7 @@
  * Cliente HTTP para comunicação com o backend FastAPI.
  */
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "http://127.0.0.1:8010";
 
 type RequestBody = Record<string, unknown>;
 
@@ -129,7 +129,7 @@ export const apiOrganizePorData = (body: RequestBody) =>
   request<TaskResponse>("/api/organize/por-data", { method: "POST", body });
 
 export const apiCancelOrganizePorData = (taskId: string) =>
-  request<{ cancelado: boolean }>(`/api/organize/cancel-data/${taskId}`, {
+  request<{ cancelado: boolean }>(`/api/organize/cancel/${taskId}`, {
     method: "POST",
   });
 

@@ -10,16 +10,9 @@ from fastapi import APIRouter, BackgroundTasks
 
 from app.models.schemas import MergePdfRequest, RemoveSenhaPdfRequest, ConvertToPdfRequest, TaskResponse
 from app.services.progress import progress_manager
+from app.utils import _fmt_bytes
 
 router = APIRouter(prefix="/api/pdf", tags=["pdf"])
-
-
-def _fmt_bytes(n: int) -> str:
-    for u in ("B", "KB", "MB", "GB"):
-        if n < 1024:
-            return f"{n:.1f} {u}"
-        n /= 1024
-    return f"{n:.1f} TB"
 
 
 async def _juntar_pdfs(req: MergePdfRequest, task_id: str) -> None:
@@ -83,7 +76,7 @@ async def _juntar_pdfs(req: MergePdfRequest, task_id: str) -> None:
                     paginas.append(page)
                 return paginas, len(reader.pages)
 
-            paginas, num_pags = await asyncio.get_event_loop().run_in_executor(None, _ler_pdf)
+            paginas, num_pags = await asyncio.get_running_loop().run_in_executor(None, _ler_pdf)
 
             for page in paginas:
                 writer.add_page(page)
@@ -109,7 +102,7 @@ async def _juntar_pdfs(req: MergePdfRequest, task_id: str) -> None:
             with open(str(saida), "wb") as f:
                 writer.write(f)
 
-        await asyncio.get_event_loop().run_in_executor(None, _salvar)
+        await asyncio.get_running_loop().run_in_executor(None, _salvar)
 
         tamanho_final = saida.stat().st_size
         msg = (
@@ -172,7 +165,7 @@ async def _remover_senha_pdf(req: RemoveSenhaPdfRequest, task_id: str) -> None:
                 pdf.save(str(saida))
             return saida.stat().st_size
 
-        tamanho = await asyncio.get_event_loop().run_in_executor(None, _processar)
+        tamanho = await asyncio.get_running_loop().run_in_executor(None, _processar)
         await pm.update_progress(task_id, 1, 1, "Concluído")
         await pm.add_log(task_id, f"📦 Salvo em: {saida}", "ok")
         await pm.complete_task(
@@ -315,7 +308,7 @@ async def _converter_para_pdf(req: ConvertToPdfRequest, task_id: str) -> None:
                 )
                 return result.returncode, result.stderr.decode("utf-8", errors="replace")
 
-            returncode, stderr_out = await asyncio.get_event_loop().run_in_executor(
+            returncode, stderr_out = await asyncio.get_running_loop().run_in_executor(
                 None, _converter
             )
 

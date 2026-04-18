@@ -6,14 +6,15 @@ import type { WsProgressMessage } from "../hooks/useWebSocket";
 import { Play, Square, FileArchive, FolderOutput, FolderKanban, CalendarDays } from "lucide-react";
 
 interface FoldersTabProps {
-  progress: WsProgressMessage | null;
+  progressMap: Record<string, WsProgressMessage>;
   onLog: (msg: string, nivel: string) => void;
 }
 
-export function FoldersTab({ progress, onLog }: FoldersTabProps) {
+export function FoldersTab({ progressMap, onLog }: FoldersTabProps) {
   const [origem, setOrigem] = useState("");
   const [destino, setDestino] = useState("");
   const [taskId, setTaskId] = useState<string | null>(null);
+  const progress = taskId ? (progressMap[taskId] ?? null) : null;
   const [loading, setLoading] = useState(false);
   const [extSubpastas, setExtSubpastas] = useState(true);
 

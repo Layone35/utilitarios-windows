@@ -1,13 +1,16 @@
 """Router de conversão de vídeo — TS→MP4 e Vídeo→Vídeo."""
-import os
 import asyncio
+import os
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks
 
 from app.models.schemas import ConvertVideoRequest, TaskResponse
 from app.services.progress import progress_manager
+from app.utils import _fmt_bytes, _scan, _resolver_nome
 
 router = APIRouter(prefix="/api/video", tags=["video"])
 
@@ -17,65 +20,105 @@ _EXT_VIDEO = {
 }
 
 
-def _fmt_bytes(n: int) -> str:
-    for u in ("B", "KB", "MB", "GB"):
-        if n < 1024:
-            return f"{n:.1f} {u}"
-        n /= 1024
-    return f"{n:.1f} TB"
+def _run_ffmpeg(cmd: list[str], task_id: str, timeout: int, loop=None) -> int:
+    """Executa ffmpeg via Popen com leitura de progresso em tempo real."""
+    prog_cmd = cmd[:-1] + ["-progress", "pipe:1", "-nostats", cmd[-1]]
 
-
-def _scan(pasta: str, exts: set[str], subpastas: bool) -> list[Path]:
-    orig = Path(pasta)
-    if subpastas:
-        candidatos = (Path(r) / f for r, _, fs in os.walk(pasta) for f in fs)
-    else:
-        candidatos = (orig / f for f in os.listdir(pasta) if (orig / f).is_file())
-    return sorted(p for p in candidatos if p.suffix.lower() in exts)
-
-
-def _resolver_nome(pasta: str, nome: str) -> Path:
-    """Gera nome único se já existir."""
-    destino = Path(pasta) / nome
-    if not destino.exists():
-        return destino
-    base = destino.stem
-    ext = destino.suffix
-    i = 1
-    while True:
-        novo = Path(pasta) / f"{base}_{i}{ext}"
-        if not novo.exists():
-            return novo
-        i += 1
-
-
-def _run_ffmpeg(cmd: list[str], task_id: str, timeout: int) -> int:
-    """Executa ffmpeg via Popen, registra proc para cancelamento/shutdown."""
     proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.DEVNULL,
+        prog_cmd,
+        stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         creationflags=subprocess.CREATE_NO_WINDOW,
+        text=True,
+        bufsize=1,
     )
     progress_manager.set_proc(task_id, proc)
+
+    stop_event = threading.Event()
+    last_log: list[float] = [0.0]
+
+    def _reader() -> None:
+        data: dict[str, str] = {}
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                if stop_event.is_set():
+                    break
+                key, _, val = line.strip().partition("=")
+                if not key:
+                    continue
+                data[key] = val.strip()
+                if key == "progress" and loop:
+                    now = time.monotonic()
+                    if now - last_log[0] >= 4:
+                        last_log[0] = now
+                        out_time = data.get("out_time", "").split(".")[0]
+                        speed = data.get("speed", "N/A")
+                        size_raw = data.get("total_size", "0")
+                        try:
+                            size_str = f"{int(size_raw) / 1_048_576:.1f} MB"
+                        except ValueError:
+                            size_str = ""
+                        partes = []
+                        if out_time:
+                            partes.append(f"⏱ {out_time}")
+                        if speed not in ("", "N/A"):
+                            partes.append(speed)
+                        if size_str:
+                            partes.append(f"→ {size_str}")
+                        if partes:
+                            asyncio.run_coroutine_threadsafe(
+                                progress_manager.add_log(task_id, "   " + " | ".join(partes), "info"),
+                                loop,
+                            )
+                    data = {}
+        except Exception:
+            pass
+        finally:
+            try:
+                proc.stdout.close()  # type: ignore[union-attr]
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
     finally:
+        stop_event.set()
         progress_manager.clear_proc(task_id)
+
+    t.join(timeout=5)
+    if t.is_alive():
+        # forçar fechamento do pipe para desbloquear a thread leitora
+        try:
+            proc.stdout.close()  # type: ignore[union-attr]
+        except Exception:
+            pass
+        t.join(timeout=2)
+
     return proc.returncode if proc.returncode is not None else -1
 
 
 async def _converter_videos(req: ConvertVideoRequest, task_id: str) -> None:
-    """Executa conversão de vídeos em background."""
     pm = progress_manager
+
+    if not req.pasta_origem.strip() or not req.pasta_destino.strip():
+        await pm.add_log(task_id, "❌ Pasta de origem e destino são obrigatórias.", "erro")
+        await pm.complete_task(task_id, "Caminhos inválidos.")
+        return
+    if not Path(req.pasta_origem).exists():
+        await pm.add_log(task_id, f"❌ Pasta de origem não encontrada: {req.pasta_origem}", "erro")
+        await pm.complete_task(task_id, "Pasta de origem não encontrada.")
+        return
+
     orig = req.pasta_origem
     dest = req.pasta_destino
     os.makedirs(dest, exist_ok=True)
 
-    # Listar arquivos
     if req.modo_ts:
         arquivos = _scan(orig, {".ts"}, req.incluir_subpastas)
     else:
@@ -89,7 +132,9 @@ async def _converter_videos(req: ConvertVideoRequest, task_id: str) -> None:
     total = len(arquivos)
     await pm.add_log(task_id, f"📊 {total} arquivo(s) encontrado(s)", "info")
 
+    loop = asyncio.get_running_loop()
     ok = err = 0
+
     for i, arq in enumerate(arquivos, 1):
         task = pm.get_task(task_id)
         if task and task.cancelada:
@@ -97,12 +142,20 @@ async def _converter_videos(req: ConvertVideoRequest, task_id: str) -> None:
             break
 
         await pm.update_progress(task_id, i, total, f"[{i}/{total}] {arq.name}")
+        await pm.add_log(task_id, f"🎬 [{i}/{total}] Processando: {arq.name}", "info")
 
         formato = "mp4" if req.modo_ts else req.formato.value
-        dest_arq = _resolver_nome(dest, arq.stem + f".{formato}")
 
-        # Montar comando FFmpeg
-        if req.codec.value == "copy" or (req.modo_ts and req.codec.value == "copy"):
+        # Preserva estrutura de subpastas com resolve() para evitar mismatch de separadores
+        try:
+            relative_dir = arq.parent.resolve().relative_to(Path(orig).resolve())
+        except ValueError:
+            relative_dir = Path()
+        dest_subdir = Path(dest) / relative_dir
+        os.makedirs(dest_subdir, exist_ok=True)
+        dest_arq = _resolver_nome(str(dest_subdir), arq.stem + f".{formato}")
+
+        if req.codec.value == "copy":
             cmd = ["ffmpeg", "-y", "-i", str(arq), "-c", "copy", str(dest_arq)]
         elif req.codec.value == "h265":
             cmd = [
@@ -112,7 +165,7 @@ async def _converter_videos(req: ConvertVideoRequest, task_id: str) -> None:
                 "-c:a", "aac", "-b:a", "192k",
                 str(dest_arq),
             ]
-        else:  # h264
+        else:
             cmd = [
                 "ffmpeg", "-y", "-i", str(arq),
                 "-c:v", "libx264", "-crf", str(req.crf),
@@ -122,11 +175,10 @@ async def _converter_videos(req: ConvertVideoRequest, task_id: str) -> None:
             ]
 
         try:
-            returncode = await asyncio.get_event_loop().run_in_executor(
+            returncode = await loop.run_in_executor(
                 None,
-                lambda c=cmd: _run_ffmpeg(c, task_id, 7200),
+                lambda c=cmd: _run_ffmpeg(c, task_id, 7200, loop),
             )
-            # Verifica se foi cancelado durante a execução
             task = pm.get_task(task_id)
             if task and task.cancelada:
                 break
@@ -152,7 +204,6 @@ async def _converter_videos(req: ConvertVideoRequest, task_id: str) -> None:
 
 @router.post("/convert", response_model=TaskResponse)
 async def convert_video(req: ConvertVideoRequest, bg: BackgroundTasks):
-    """Inicia conversão de vídeo(s) em background."""
     task_id = progress_manager.create_task("video_convert")
     bg.add_task(_converter_videos, req, task_id)
     return TaskResponse(task_id=task_id, message="Conversão iniciada")
@@ -160,6 +211,5 @@ async def convert_video(req: ConvertVideoRequest, bg: BackgroundTasks):
 
 @router.post("/cancel/{task_id}")
 async def cancel_video(task_id: str):
-    """Cancela uma tarefa em andamento."""
     ok = progress_manager.cancel_task(task_id)
     return {"cancelado": ok}
