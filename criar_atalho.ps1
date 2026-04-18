@@ -23,6 +23,16 @@ $ShortcutStop.IconLocation    = "shell32.dll,131"
 $ShortcutStop.WindowStyle     = 7
 $ShortcutStop.Save()
 
+# 3. Atalho para Reiniciar Backend (Silencioso)
+$ShortcutRestart = $WshShell.CreateShortcut("$DesktopPath\Reiniciar Backend.lnk")
+$ShortcutRestart.TargetPath       = "wscript.exe"
+$ShortcutRestart.Arguments        = "`"$ProjectDir\reiniciar_backend.vbs`""
+$ShortcutRestart.WorkingDirectory = $ProjectDir
+$ShortcutRestart.IconLocation     = "shell32.dll,238"
+$ShortcutRestart.WindowStyle      = 7
+$ShortcutRestart.Save()
+
 Write-Host "Atalhos criados com sucesso na Área de Trabalho!"
 Write-Host " - Utilitários Windows (Início Silencioso)"
 Write-Host " - Parar Utilitários (Encerramento Silencioso)"
+Write-Host " - Reiniciar Backend (Reinício Silencioso)"
