@@ -1,12 +1,12 @@
 """Router de conversão de áudio — Vídeo→Áudio e Áudio→Áudio."""
 import asyncio
 import os
-import subprocess
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks
 
 from app.models.schemas import ExtractAudioRequest, ConvertAudioRequest, TaskResponse
+from app.services.ffmpeg_handler import run_ffmpeg
 from app.services.progress import progress_manager
 from app.utils import _fmt_bytes, _scan, _resolver_nome
 
@@ -42,23 +42,6 @@ _CODEC_AA = {
     "opus": ["-c:a", "libopus", "-b:a"],
 }
 
-
-def _run_ffmpeg(cmd: list[str], task_id: str, timeout: int) -> int:
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
-    progress_manager.set_proc(task_id, proc)
-    try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-    finally:
-        progress_manager.clear_proc(task_id)
-    return proc.returncode if proc.returncode is not None else -1
 
 
 async def _extrair_audio(req: ExtractAudioRequest, task_id: str) -> None:
@@ -110,7 +93,7 @@ async def _extrair_audio(req: ExtractAudioRequest, task_id: str) -> None:
         try:
             returncode = await loop.run_in_executor(
                 None,
-                lambda c=cmd: _run_ffmpeg(c, task_id, 3600),
+                lambda c=cmd: run_ffmpeg(c, task_id, 3600),
             )
             task = pm.get_task(task_id)
             if task and task.cancelada:
@@ -176,7 +159,7 @@ async def _converter_audio(req: ConvertAudioRequest, task_id: str) -> None:
         try:
             returncode = await loop.run_in_executor(
                 None,
-                lambda c=cmd: _run_ffmpeg(c, task_id, 3600),
+                lambda c=cmd: run_ffmpeg(c, task_id, 3600),
             )
             task = pm.get_task(task_id)
             if task and task.cancelada:

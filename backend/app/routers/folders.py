@@ -6,22 +6,6 @@ import subprocess
 import zipfile
 from pathlib import Path
 
-
-def _find_7z() -> str:
-    import shutil as _shutil
-    exe = _shutil.which("7z") or _shutil.which("7z.exe")
-    if exe:
-        return exe
-    for candidate in [
-        r"C:\Program Files\7-Zip\7z.exe",
-        r"C:\Program Files (x86)\7-Zip\7z.exe",
-    ]:
-        if os.path.isfile(candidate):
-            return candidate
-    return "7z"
-
-_7Z = _find_7z()
-
 from fastapi import APIRouter, BackgroundTasks
 
 from app.models.schemas import (
@@ -34,6 +18,21 @@ from app.models.schemas import (
 )
 from app.services.progress import progress_manager
 from app.utils import _fmt_bytes, _scan
+
+
+def _find_7z() -> str:
+    exe = shutil.which("7z") or shutil.which("7z.exe")
+    if exe:
+        return exe
+    for candidate in [
+        r"C:\Program Files\7-Zip\7z.exe",
+        r"C:\Program Files (x86)\7-Zip\7z.exe",
+    ]:
+        if os.path.isfile(candidate):
+            return candidate
+    return "7z"
+
+_7Z = _find_7z()
 
 router = APIRouter(prefix="/api/folders", tags=["folders"])
 

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.models.schemas import TaskResponse
 from app.services.progress import progress_manager
+from app.utils import _fmt_bytes
 
 router = APIRouter(prefix="/api/duplicatas", tags=["duplicatas"])
 
@@ -23,6 +24,7 @@ _SUFIXOS = (
 
 # Armazena resultados de scans por task_id (em memória)
 _resultados: dict[str, list[dict[str, Any]]] = {}
+_resultados_lock = asyncio.Lock()
 
 
 # ── Schemas locais ────────────────────────────────────────────────
@@ -38,14 +40,6 @@ class DeletarArquivosRequest(BaseModel):
 
 
 # ── Helpers ───────────────────────────────────────────────────────
-
-def _fmt_tamanho(n: int) -> str:
-    for u in ("B", "KB", "MB", "GB"):
-        if n < 1024:
-            return f"{n:.1f} {u}"
-        n /= 1024
-    return f"{n:.1f} TB"
-
 
 def _fmt_data(ts: float) -> str:
     return datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M")
@@ -77,7 +71,7 @@ def _info_arquivo(arq: Path) -> dict[str, Any]:
             "nome": arq.name,
             "pasta": str(arq.parent),
             "tamanho": tam,
-            "tamanho_fmt": _fmt_tamanho(tam),
+            "tamanho_fmt": _fmt_bytes(tam),
             "data_mod": _fmt_data(stat.st_mtime),
         }
     except OSError:
@@ -144,9 +138,9 @@ async def _scan_exatas(arquivos: list[Path], task_id: str) -> list[dict[str, Any
                 "chave": h[:16],
                 "arquivos": [_info_arquivo(a) for a in arqs],
                 "tamanho_total": tam_total,
-                "tamanho_total_fmt": _fmt_tamanho(tam_total),
+                "tamanho_total_fmt": _fmt_bytes(tam_total),
                 "espaco_recuperavel": tam_recuperavel,
-                "espaco_recuperavel_fmt": _fmt_tamanho(tam_recuperavel),
+                "espaco_recuperavel_fmt": _fmt_bytes(tam_recuperavel),
             })
 
     await pm.add_log(task_id, f"🔍 Duplicatas exatas: {len(grupos)} grupo(s)", "info")
@@ -181,7 +175,7 @@ async def _scan_familias(arquivos: list[Path], task_id: str) -> list[dict[str, A
                 "chave": base,
                 "arquivos": [_info_arquivo(a) for a in arqs_sorted],
                 "tamanho_total": tam_total,
-                "tamanho_total_fmt": _fmt_tamanho(tam_total),
+                "tamanho_total_fmt": _fmt_bytes(tam_total),
                 "espaco_recuperavel": 0,
                 "espaco_recuperavel_fmt": "—",
             })
@@ -218,10 +212,11 @@ async def _executar_scan(req: DuplicatasScanRequest, task_id: str) -> None:
         await pm.add_log(task_id, "🗂 Buscando famílias por nome...", "info")
         grupos += await _scan_familias(arquivos, task_id)
 
-    _resultados[task_id] = grupos
+    async with _resultados_lock:
+        _resultados[task_id] = grupos
 
     total_espaco = sum(g["espaco_recuperavel"] for g in grupos)
-    msg = f"✅ {len(grupos)} grupo(s) encontrado(s) — {_fmt_tamanho(total_espaco)} recuperáveis"
+    msg = f"✅ {len(grupos)} grupo(s) encontrado(s) — {_fmt_bytes(total_espaco)} recuperáveis"
     await pm.complete_task(task_id, msg)
 
 
@@ -236,13 +231,14 @@ async def scan_duplicatas(req: DuplicatasScanRequest, bg: BackgroundTasks):
 
 @router.get("/resultado/{task_id}")
 async def get_resultado(task_id: str):
-    grupos = _resultados.get(task_id, [])
+    async with _resultados_lock:
+        grupos = _resultados.get(task_id, [])
     total_espaco = sum(g["espaco_recuperavel"] for g in grupos)
     return {
         "grupos": grupos,
         "total_grupos": len(grupos),
         "espaco_recuperavel": total_espaco,
-        "espaco_recuperavel_fmt": _fmt_tamanho(total_espaco) if total_espaco else "0 B",
+        "espaco_recuperavel_fmt": _fmt_bytes(total_espaco) if total_espaco else "0 B",
     }
 
 
@@ -266,7 +262,7 @@ async def deletar_arquivos(req: DeletarArquivosRequest):
         "deletados": len(deletados),
         "erros": erros,
         "bytes_liberados": bytes_liberados,
-        "bytes_liberados_fmt": _fmt_tamanho(bytes_liberados),
+        "bytes_liberados_fmt": _fmt_bytes(bytes_liberados),
     }
 
 

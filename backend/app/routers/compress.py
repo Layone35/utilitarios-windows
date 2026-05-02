@@ -16,6 +16,7 @@ from app.models.schemas import (
     TaskResponse,
 )
 from app.services.progress import progress_manager
+from app.utils import _fmt_bytes, _fmt_tempo, _scan, _resolver_nome
 
 router = APIRouter(prefix="/api/compress", tags=["compress"])
 
@@ -35,48 +36,6 @@ _GPU_CODEC: dict[tuple[str, str], tuple[str, str, str]] = {
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
-
-def _fmt_bytes(n: int) -> str:
-    for u in ("B", "KB", "MB", "GB"):
-        if n < 1024:
-            return f"{n:.1f} {u}"
-        n /= 1024
-    return f"{n:.1f} TB"
-
-
-def _fmt_tempo(seg: float) -> str:
-    seg = int(seg)
-    if seg < 60:
-        return f"{seg}s"
-    m, s = divmod(seg, 60)
-    if m < 60:
-        return f"{m}m{s:02d}s"
-    h, m = divmod(m, 60)
-    return f"{h}h{m:02d}m{s:02d}s"
-
-
-def _scan(pasta: str, exts: set[str], subpastas: bool) -> list[Path]:
-    orig = Path(pasta)
-    if subpastas:
-        candidatos = (Path(r) / f for r, _, fs in os.walk(pasta) for f in fs)
-    else:
-        candidatos = (orig / f for f in os.listdir(pasta) if (orig / f).is_file())
-    return sorted(p for p in candidatos if p.suffix.lower() in exts)
-
-
-def _resolver_nome(pasta: str, nome: str) -> Path:
-    destino = Path(pasta) / nome
-    if not destino.exists():
-        return destino
-    base = destino.stem
-    ext = destino.suffix
-    i = 1
-    while True:
-        novo = Path(pasta) / f"{base}_{i}{ext}"
-        if not novo.exists():
-            return novo
-        i += 1
-
 
 def _dest_pasta(pasta_origem: str, pasta_destino: str, arq: Path) -> Path:
     try:

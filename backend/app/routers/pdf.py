@@ -14,6 +14,41 @@ from app.utils import _fmt_bytes
 
 router = APIRouter(prefix="/api/pdf", tags=["pdf"])
 
+_EXTS_CONV = {".docx", ".doc", ".txt", ".md", ".odt", ".rtf", ".pptx", ".ppt", ".odp", ".pps", ".ppsx"}
+
+
+def _find_soffice() -> str | None:
+    """Localiza o executável do LibreOffice ou retorna None se não encontrado."""
+    exe = shutil.which("soffice")
+    if exe:
+        return exe
+    for p in [
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+    ]:
+        if Path(p).exists():
+            return p
+    return None
+
+
+def _md_para_html(conteudo: str) -> str:
+    """Converte texto Markdown para HTML completo pronto para o LibreOffice."""
+    import markdown as md_lib
+    body = md_lib.markdown(conteudo, extensions=["tables", "fenced_code"])
+    return f"""<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<style>
+  body {{ font-family: Arial, sans-serif; margin: 2cm; line-height: 1.6; }}
+  h1,h2,h3 {{ color: #333; }}
+  pre {{ background: #f4f4f4; padding: 1em; border-radius: 4px; overflow-x: auto; }}
+  code {{ background: #f4f4f4; padding: 2px 4px; border-radius: 2px; }}
+  table {{ border-collapse: collapse; width: 100%; }}
+  th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+  th {{ background: #f2f2f2; }}
+</style>
+</head><body>{body}</body></html>"""
+
 
 async def _juntar_pdfs(req: MergePdfRequest, task_id: str) -> None:
     """Junta múltiplos PDFs em um único arquivo."""
@@ -189,28 +224,12 @@ async def remove_senha_pdf(req: RemoveSenhaPdfRequest, bg: BackgroundTasks):
 
 # ── Converter para PDF ─────────────────────────────────────────────
 async def _converter_para_pdf(req: ConvertToPdfRequest, task_id: str) -> None:
-    """Converte .docx, .txt e .md para PDF via LibreOffice headless."""
+    """Converte .docx, .txt, .md e outros formatos para PDF via LibreOffice."""
     pm = progress_manager
 
-    # Verificar se LibreOffice está disponível
-    soffice = shutil.which("soffice")
+    soffice = _find_soffice()
     if not soffice:
-        # Tentar caminhos padrão no Windows
-        possiveis = [
-            r"C:\Program Files\LibreOffice\program\soffice.exe",
-            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
-        ]
-        for p in possiveis:
-            if Path(p).exists():
-                soffice = p
-                break
-
-    if not soffice:
-        await pm.add_log(
-            task_id,
-            "❌ LibreOffice não encontrado. Instale em: https://www.libreoffice.org/",
-            "erro",
-        )
+        await pm.add_log(task_id, "❌ LibreOffice não encontrado. Instale em: https://www.libreoffice.org/", "erro")
         await pm.complete_task(task_id, "LibreOffice não encontrado.")
         return
 
@@ -218,20 +237,10 @@ async def _converter_para_pdf(req: ConvertToPdfRequest, task_id: str) -> None:
     dest = req.pasta_destino
     os.makedirs(dest, exist_ok=True)
 
-    _EXTS = {".docx", ".doc", ".txt", ".md", ".odt", ".rtf", ".pptx", ".ppt", ".odp", ".pps", ".ppsx"}
-
     if req.incluir_subpastas:
-        arquivos = sorted([
-            Path(r) / f
-            for r, _, fs in os.walk(orig)
-            for f in fs if Path(f).suffix.lower() in _EXTS
-        ])
+        arquivos = sorted(Path(r) / f for r, _, fs in os.walk(orig) for f in fs if Path(f).suffix.lower() in _EXTS_CONV)
     else:
-        arquivos = sorted([
-            Path(orig) / f
-            for f in os.listdir(orig)
-            if Path(f).suffix.lower() in _EXTS and (Path(orig) / f).is_file()
-        ])
+        arquivos = sorted(Path(orig) / f for f in os.listdir(orig) if Path(f).suffix.lower() in _EXTS_CONV and (Path(orig) / f).is_file())
 
     if not arquivos:
         await pm.add_log(task_id, "ℹ️ Nenhum arquivo .docx/.txt/.md encontrado.", "warn")
@@ -242,7 +251,7 @@ async def _converter_para_pdf(req: ConvertToPdfRequest, task_id: str) -> None:
     await pm.add_log(task_id, f"📄 {total} arquivo(s) encontrado(s). Iniciando conversão...", "info")
 
     ok = err = 0
-    tmp_dir = None
+    tmp_dir: str | None = None
 
     for i, arq in enumerate(arquivos, 1):
         task = pm.get_task(task_id)
@@ -252,73 +261,35 @@ async def _converter_para_pdf(req: ConvertToPdfRequest, task_id: str) -> None:
         await pm.update_progress(task_id, i, total, f"[{i}/{total}] {arq.name}")
 
         try:
-            # Para .md: converter para HTML primeiro
             arquivo_para_converter = arq
             tmp_html: Path | None = None
 
             if arq.suffix.lower() == ".md":
                 try:
-                    import markdown as md_lib
+                    html = _md_para_html(arq.read_text(encoding="utf-8", errors="replace"))
                 except ImportError:
-                    await pm.add_log(
-                        task_id,
-                        "❌ lib 'markdown' não instalada. Execute: pip install markdown",
-                        "erro",
-                    )
+                    await pm.add_log(task_id, "❌ lib 'markdown' não instalada. Execute: pip install markdown", "erro")
                     err += 1
                     continue
-
-                conteudo_md = arq.read_text(encoding="utf-8", errors="replace")
-                html_body = md_lib.markdown(conteudo_md, extensions=["tables", "fenced_code"])
-                html_completo = f"""<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8">
-<style>
-  body {{ font-family: Arial, sans-serif; margin: 2cm; line-height: 1.6; }}
-  h1,h2,h3 {{ color: #333; }}
-  pre {{ background: #f4f4f4; padding: 1em; border-radius: 4px; overflow-x: auto; }}
-  code {{ background: #f4f4f4; padding: 2px 4px; border-radius: 2px; }}
-  table {{ border-collapse: collapse; width: 100%; }}
-  th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-  th {{ background: #f2f2f2; }}
-</style>
-</head><body>{html_body}</body></html>"""
-
                 if tmp_dir is None:
                     tmp_dir = tempfile.mkdtemp()
                 tmp_html = Path(tmp_dir) / (arq.stem + ".html")
-                tmp_html.write_text(html_completo, encoding="utf-8")
+                tmp_html.write_text(html, encoding="utf-8")
                 arquivo_para_converter = tmp_html
 
-            # Rodar LibreOffice para converter para PDF
             def _converter(entrada: Path = arquivo_para_converter, saida_dir: str = dest):
-                creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
                 result = subprocess.run(
-                    [
-                        soffice,
-                        "--headless",
-                        "--convert-to", "pdf",
-                        "--outdir", saida_dir,
-                        str(entrada),
-                    ],
+                    [soffice, "--headless", "--convert-to", "pdf", "--outdir", saida_dir, str(entrada)],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
                     timeout=120,
-                    creationflags=creationflags,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
                 )
                 return result.returncode, result.stderr.decode("utf-8", errors="replace")
 
-            returncode, stderr_out = await asyncio.get_running_loop().run_in_executor(
-                None, _converter
-            )
+            returncode, stderr_out = await asyncio.get_running_loop().run_in_executor(None, _converter)
 
-            # LibreOffice salva com o nome do arquivo de entrada + .pdf
-            # Se era .md convertido para .html, o pdf vai ter nome do .html
-            # Precisamos renomear para o nome original do .md
-            pdf_gerado_nome = arquivo_para_converter.stem + ".pdf"
-            pdf_gerado = Path(dest) / pdf_gerado_nome
-
-            # Se foi .md e o pdf foi gerado com nome do .html, renomear para nome do .md
+            pdf_gerado = Path(dest) / (arquivo_para_converter.stem + ".pdf")
             if tmp_html is not None and pdf_gerado.exists():
                 pdf_final = Path(dest) / (arq.stem + ".pdf")
                 if pdf_final != pdf_gerado:
@@ -328,15 +299,10 @@ async def _converter_para_pdf(req: ConvertToPdfRequest, task_id: str) -> None:
                     pdf_gerado = pdf_final
 
             if returncode == 0 and pdf_gerado.exists():
-                tamanho = pdf_gerado.stat().st_size
-                await pm.add_log(
-                    task_id,
-                    f"✅ {arq.name} → {pdf_gerado.name} ({_fmt_bytes(tamanho)})",
-                    "ok",
-                )
+                await pm.add_log(task_id, f"✅ {arq.name} → {pdf_gerado.name} ({_fmt_bytes(pdf_gerado.stat().st_size)})", "ok")
                 ok += 1
             else:
-                detalhe = stderr_out.strip()[:200] if stderr_out.strip() else "sem detalhes"
+                detalhe = stderr_out.strip()[:200] or "sem detalhes"
                 await pm.add_log(task_id, f"❌ {arq.name}: {detalhe}", "erro")
                 err += 1
 
@@ -344,7 +310,6 @@ async def _converter_para_pdf(req: ConvertToPdfRequest, task_id: str) -> None:
             await pm.add_log(task_id, f"❌ {arq.name}: {e}", "erro")
             err += 1
 
-    # Limpar arquivos temporários
     if tmp_dir and Path(tmp_dir).exists():
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
