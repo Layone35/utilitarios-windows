@@ -1,5 +1,6 @@
 """Control Pro — Backend API para automações locais."""
 import atexit
+import os
 import subprocess
 from contextlib import asynccontextmanager
 
@@ -56,9 +57,6 @@ app.include_router(organize.router)
 app.include_router(b3.router)
 app.include_router(duplicatas.router)
 
-
-import os
-import glob
 
 def _check_ffmpeg() -> bool:
     """Verifica se FFmpeg está disponível no PATH ou em pacotes WinGet."""
